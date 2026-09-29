@@ -1,0 +1,12 @@
+{
+  "name": "rubiks-cube-coach",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Camera-based Rubik's Cube coach: scan your cube, learn the white-face-first method, then drill for speed.",
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "start": "npx -y http-server -c-1 -p 8080 ."
+  },
+  "license": "MIT"
+}
