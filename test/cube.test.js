@@ -117,3 +117,34 @@ test('validate rejects impossible cubes with a reason', () => {
   assert.match(validate(SOLVED.replace('R', 'U')).errors.join(), /appears/);
   assert.equal(validate('short').ok, false);
 });
+
+test('validate accepts all 24 held orientations but rejects impossible center layouts', () => {
+  const seen = new Set();
+  for (const a of ['', 'x', 'x2', "x'", 'z', "z'"]) {
+    for (const b of ['', 'y', 'y2', "y'"]) {
+      const s = applyMoves(SOLVED, `${a} ${b} R U F'`);
+      seen.add([4, 13, 22, 31, 40, 49].map((i) => s[i]).join(''));
+      assert.ok(validate(s).ok, `${a} ${b}`);
+    }
+  }
+  assert.equal(seen.size, 24);
+  // Mirror image (red and orange centers swapped everywhere): consistent pieces, unreal cube.
+  const mirror = (s) => [...s].map((c) => ({ R: 'L', L: 'R' })[c] ?? c).join('');
+  assert.match(validate(mirror(SOLVED)).errors.join(), /centers are not arranged/);
+  assert.match(validate(mirror(applyMoves(SOLVED, "R U F' L2 D B"))).errors.join(), /centers are not arranged/);
+  // Two centers swapped: the first error names the centers, not a list of bogus corners.
+  assert.match(validate(swap(SOLVED, 4, 22)).errors[0], /centers are not arranged/);
+  // A duplicated center is still reported as such.
+  const dup = [...SOLVED]; dup[22] = 'U'; dup[0] = 'F';
+  assert.deepEqual(validate(dup.join('')).errors, ['Two centers have the same color.']);
+});
+
+test('validate rejects every single swap of two differently colored stickers', () => {
+  const rand = mulberry32(5);
+  for (let n = 0; n < 5; n++) {
+    const s = applyMoves(SOLVED, randomScramble(25, rand));
+    for (let i = 0; i < 54; i++) {
+      for (let j = i + 1; j < 54; j++) if (s[i] !== s[j]) assert.equal(validate(swap(s, i, j)).ok, false, `${i}<->${j}`);
+    }
+  }
+});
