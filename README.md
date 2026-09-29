@@ -12,8 +12,10 @@ npm start        # serves on http://localhost:8080
 npm test
 ```
 
-The camera needs HTTPS or `localhost`. On a phone, use the deployed site (GitHub Pages)
-or a tunnel to your laptop.
+The camera needs HTTPS or `localhost`. On a phone, use the deployed site:
+**https://deppmann.github.io/Rubiks-cube-coach/** — every push to `main` runs the tests and
+redeploys it (`.github/workflows/pages.yml`; one-time setup: Settings → Pages → Source:
+GitHub Actions).
 
 ## How it works
 
