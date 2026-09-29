@@ -42,8 +42,8 @@
           <div class="hold-figure" aria-hidden="true" data-iso-cube></div>
           <div>
             <h2>Scan your cube</h2>
-            <p>Hold it with <strong>white on the bottom</strong> and <strong>green facing you</strong> (yellow on top).
-              Keep that grip the whole time: the coach shows every move from the same angle.</p>
+            <p>Hold the cube in front of the camera and turn it slowly. Each side is captured on its own as soon as you
+              hold it still, in <strong>any order</strong>. Keep <strong>white on the bottom</strong> when you can.</p>
           </div>
         </div>
         <button type="button" class="btn primary big" id="cam-start">
@@ -61,23 +61,20 @@
 
       <div id="scan-camera" class="stack" hidden>
         <div class="scan-head">
-          <ol class="scan-dots" id="scan-dots" aria-label="Faces scanned"></ol>
-          <h2 id="scan-title"><span class="face-swatch" id="scan-swatch"></span><span id="scan-title-text"></span></h2>
-          <p id="scan-instr"></p>
+          <h2>Show each side</h2>
+          <p id="scan-instr">Any order. Keep white on the bottom when you can.</p>
+          <ol class="scan-dots" id="scan-dots" aria-label="Colors captured so far"></ol>
         </div>
         <div class="cam-frame">
           <video id="cam-video" muted playsinline autoplay></video>
           <canvas id="cam-overlay" aria-hidden="true"></canvas>
-          <p class="cam-hint">Fill the grid with the face, then capture.</p>
+          <div class="cam-flash" id="cam-flash" aria-hidden="true"></div>
+          <p class="cam-hint" id="cam-hint">Looking for a cube face…</p>
         </div>
+        <ol class="tray" id="tray" aria-label="Captured sides. Tap one to retake it."></ol>
         <div class="row">
           <button type="button" class="btn ghost" id="cam-cancel">Cancel</button>
-          <button type="button" class="btn primary big grow" id="cam-capture">Capture</button>
-        </div>
-        <div class="readout" id="readout" hidden>
-          <div class="readout-grid" id="readout-grid" aria-hidden="true"></div>
-          <p><span id="readout-label"></span><br><span class="muted small">Colors look off? Retake it in better light.</span></p>
-          <button type="button" class="btn small" id="readout-retake">Retake</button>
+          <button type="button" class="btn primary big grow" id="cam-capture">Capture now</button>
         </div>
       </div>
 

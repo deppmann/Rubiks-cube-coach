@@ -1,6 +1,9 @@
 // Camera capture + sticker color classification.
-// The color math and classifyFaces are pure (no DOM) so they run in Node tests;
-// CameraScanner is the only part that touches the browser.
+// classifyFaces is pure (no DOM) so it runs in Node tests; CameraScanner is the only part
+// that touches the browser.
+
+import { classifyStickers, rgbToLab } from './colors.js';
+import { validate } from './cube.js';
 
 export const SCAN_ORDER = [
   { face: 'F', title: 'Green face', instruction: 'Hold the cube with white on the bottom and the green center facing the camera. Line it up with the grid.' },
@@ -11,106 +14,34 @@ export const SCAN_ORDER = [
   { face: 'D', title: 'White face', instruction: 'Now tip the cube so white faces you, with the green side at the top of the picture.' },
 ];
 
-// ---- Color math (pure) -----------------------------------------------------------
+// ---- Color classification (pure) ---------------------------------------------------
+// The color math lives in colors.js (white balance, balanced clustering, center elimination);
+// rgbToLab stays exported from here for compatibility.
 
-const lin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
-const labF = (t) => (t > 216 / 24389 ? Math.cbrt(t) : (24389 / 27 * t + 16) / 116);
-
-// sRGB (0-255) → CIELAB, D65.
-export function rgbToLab({ r, g, b }) {
-  const R = lin(r), G = lin(g), B = lin(b);
-  const x = (0.4124564 * R + 0.3575761 * G + 0.1804375 * B) / 0.95047;
-  const y = 0.2126729 * R + 0.7151522 * G + 0.072175 * B;
-  const z = (0.0193339 * R + 0.119192 * G + 0.9503041 * B) / 1.08883;
-  const fx = labF(x), fy = labF(y), fz = labF(z);
-  return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
-}
-
-// Lighting changes L a lot but hue little, so L is down-weighted; hue (a,b) separates
-// red/orange and white/yellow. Chroma-normalised hue is added so dim orange isn't "red".
-const L_WEIGHT = 0.45;
-function features(lab) {
-  const [L, a, b] = lab;
-  const chroma = Math.hypot(a, b);
-  // Unit hue vector scaled by a saturating chroma: pushes red/orange apart at any brightness.
-  const k = 30 * Math.min(1, chroma / 25) / (chroma || 1);
-  return [L_WEIGHT * L, a, b, k * a, k * b];
-}
-const dist2 = (p, q) => { let s = 0; for (let i = 0; i < p.length; i++) s += (p[i] - q[i]) ** 2; return s; };
-
-// Min-cost assignment (Hungarian, O(n^3)); cost is n×m with n <= m. Returns column per row.
-function hungarian(cost) {
-  const n = cost.length, m = cost[0].length;
-  const u = new Array(n + 1).fill(0), v = new Array(m + 1).fill(0);
-  const p = new Array(m + 1).fill(0), way = new Array(m + 1).fill(0);
-  for (let i = 1; i <= n; i++) {
-    p[0] = i;
-    let j0 = 0;
-    const minv = new Array(m + 1).fill(Infinity), used = new Array(m + 1).fill(false);
-    do {
-      used[j0] = true;
-      const i0 = p[j0];
-      let delta = Infinity, j1 = 0;
-      for (let j = 1; j <= m; j++) {
-        if (used[j]) continue;
-        const cur = cost[i0 - 1][j - 1] - u[i0] - v[j];
-        if (cur < minv[j]) { minv[j] = cur; way[j] = j0; }
-        if (minv[j] < delta) { delta = minv[j]; j1 = j; }
-      }
-      for (let j = 0; j <= m; j++) {
-        if (used[j]) { u[p[j]] += delta; v[j] -= delta; } else minv[j] -= delta;
-      }
-      j0 = j1;
-    } while (p[j0] !== 0);
-    do { const j1 = way[j0]; p[j0] = p[j1]; j0 = j1; } while (j0);
-  }
-  const res = new Array(n);
-  for (let j = 1; j <= m; j++) if (p[j]) res[p[j] - 1] = j - 1;
-  return res;
-}
+export { rgbToLab };
 
 const FACE_ORDER = ['U', 'R', 'F', 'D', 'L', 'B'];
 
-// samples: { U: [9 rgb], ... } → { facelets, confidence[54] }. Each letter is the face
-// whose center the sticker matches; every letter gets exactly 9 stickers.
-export function classifyFaces(samples) {
-  const feats = FACE_ORDER.map((f) => samples[f].map((s) => features(rgbToLab(s))));
-  const centerF = feats.map((fs) => fs[4]);
-  let cents = centerF.map((c) => c.slice());
-  const dim = cents[0].length;
-  const items = []; // non-center stickers
-  feats.forEach((fs, f) => fs.forEach((x, i) => { if (i !== 4) items.push({ f, i, x }); }));
-
-  let cost;
-  const assign = () => {
-    cost = items.map((it) => cents.map((c) => dist2(it.x, c)));
-    // 6 colors × 8 slots each (centers already hold the 9th).
-    const wide = cost.map((row) => row.flatMap((d) => new Array(8).fill(d)));
-    const cols = hungarian(wide);
-    items.forEach((it, k) => { it.c = Math.floor(cols[k] / 8); });
+// samples: { U: [9 rgb], ... } (each face upright, as scanned in SCAN_ORDER) → { facelets,
+// confidence[54] }. Each letter is the face whose center the sticker matches; every letter
+// gets exactly 9 stickers. Centers are inferred, not trusted, so a logo on a center cap or a
+// warm cast does not corrupt the result. Extra: `names`/`centers` (color names, U R F D L B order).
+export function classifyFaces(samples, { centerRings } = {}) {
+  const res = classifyStickers(FACE_ORDER.map((f) => samples?.[f]), { centerRings });
+  const build = (centers) => {
+    const letterOf = Object.fromEntries(centers.map((c, i) => [c, FACE_ORDER[i]]));
+    return res.names.map((face, i) => face.map((c, j) => letterOf[j === 4 ? centers[i] : c] ?? '?').join('')).join('');
   };
-  assign();
-  // K-means style refinement: centroids from centers + assigned stickers, then reassign.
-  for (let pass = 0; pass < 2; pass++) {
-    cents = cents.map((_, c) => {
-      const mem = items.filter((it) => it.c === c).map((it) => it.x).concat([centerF[c]]);
-      return Array.from({ length: dim }, (_, d) => mem.reduce((s, x) => s + x[d], 0) / mem.length);
-    });
-    assign();
+  // Faces are in a known order here, so when two centers look alike (a logo, glare) the
+  // cube's own structure tells which reading is real: first candidate that validates wins.
+  let centers = res.centers, facelets = build(centers);
+  if (!validate(facelets).ok) {
+    for (const alt of res.centerAlternatives) {
+      const f = build(alt);
+      if (validate(f).ok) { centers = alt; facelets = f; break; }
+    }
   }
-
-  const chars = new Array(54);
-  const confidence = new Array(54).fill(1);
-  FACE_ORDER.forEach((f, fi) => { chars[fi * 9 + 4] = f; });
-  items.forEach((it, k) => {
-    const idx = FACE_ORDER.indexOf(FACE_ORDER[it.f]) * 9 + it.i;
-    chars[idx] = FACE_ORDER[it.c];
-    const d = cost[k].map(Math.sqrt);
-    const mine = d[it.c];
-    const other = Math.min(...d.filter((_, c) => c !== it.c));
-    confidence[idx] = Math.max(0, Math.min(1, (other - mine) / (other + mine || 1)));
-  });
-  return { facelets: chars.join(''), confidence };
+  return { facelets, confidence: res.confidence.flat(), names: res.names.map((n, i) => n.map((c, j) => (j === 4 ? centers[i] : c))), centers };
 }
 
 // ---- Camera (DOM) ----------------------------------------------------------------
