@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" content="#0f1115" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+  <meta name="description" content="Scan your Rubik's Cube with your phone camera and learn to solve it, one layer at a time, with an animated 3D coach.">
+  <title>Cube Coach</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%2314161b'/%3E%3Cg fill='%23ffd500'%3E%3Crect x='5' y='5' width='6' height='6' rx='1.5'/%3E%3Crect x='13' y='5' width='6' height='6' rx='1.5'/%3E%3Crect x='21' y='5' width='6' height='6' rx='1.5'/%3E%3C/g%3E%3Cg fill='%23009b48'%3E%3Crect x='5' y='13' width='6' height='6' rx='1.5'/%3E%3Crect x='13' y='13' width='6' height='6' rx='1.5'/%3E%3Crect x='21' y='13' width='6' height='6' rx='1.5'/%3E%3C/g%3E%3Cg fill='%23ffffff'%3E%3Crect x='5' y='21' width='6' height='6' rx='1.5'/%3E%3Crect x='13' y='21' width='6' height='6' rx='1.5'/%3E%3Crect x='21' y='21' width='6' height='6' rx='1.5'/%3E%3C/g%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./src/app.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark" aria-hidden="true" data-iso-cube></span><h1>Cube Coach</h1></div>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button type="button" role="tab" id="tab-scan" aria-controls="panel-scan" data-tab="scan">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/><rect x="8" y="8" width="8" height="8" rx="1.5"/></svg>
+        <span>Scan</span>
+      </button>
+      <button type="button" role="tab" id="tab-coach" aria-controls="panel-coach" data-tab="coach">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3 4 7.5v9L12 21l8-4.5v-9L12 3Z"/><path d="M4 7.5 12 12l8-4.5M12 12v9"/></svg>
+        <span>Coach</span>
+      </button>
+      <button type="button" role="tab" id="tab-practice" aria-controls="panel-practice" data-tab="practice">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9.5 2h5M12 2v3"/></svg>
+        <span>Practice</span>
+      </button>
+    </nav>
+    <button type="button" class="btn ghost small learn-btn" id="notation-open">Learn the moves</button>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <!-- ================= Scan ================= -->
+    <section class="panel" id="panel-scan" role="tabpanel" aria-labelledby="tab-scan" hidden>
+      <div id="scan-intro" class="stack">
+        <div class="card hold-card">
+          <div class="hold-figure" aria-hidden="true" data-iso-cube></div>
+          <div>
+            <h2>Scan your cube</h2>
+            <p>Hold it with <strong>white on the bottom</strong> and <strong>green facing you</strong> (yellow on top).
+              Keep that grip the whole time: the coach shows every move from the same angle.</p>
+          </div>
+        </div>
+        <button type="button" class="btn primary big" id="cam-start">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6H8l1.5-2h5L16 6h2.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-9Z"/><circle cx="12" cy="13" r="3.5"/></svg>
+          Start camera
+        </button>
+        <p class="note">The camera turns on only when you tap, and the picture never leaves your device.</p>
+        <p class="error-box" id="cam-error" role="alert" hidden></p>
+        <div class="alt-actions">
+          <button type="button" class="btn" id="manual-start">No camera? Enter colors by hand</button>
+          <button type="button" class="btn" id="scramble-start">Try a random scramble</button>
+          <button type="button" class="btn ghost" id="resume-coach" hidden>Continue with your last cube</button>
+        </div>
+      </div>
+
+      <div id="scan-camera" class="stack" hidden>
+        <div class="scan-head">
+          <ol class="scan-dots" id="scan-dots" aria-label="Faces scanned"></ol>
+          <h2 id="scan-title"><span class="face-swatch" id="scan-swatch"></span><span id="scan-title-text"></span></h2>
+          <p id="scan-instr"></p>
+        </div>
+        <div class="cam-frame">
+          <video id="cam-video" muted playsinline autoplay></video>
+          <canvas id="cam-overlay" aria-hidden="true"></canvas>
+          <p class="cam-hint">Fill the grid with the face, then capture.</p>
+        </div>
+        <div class="row">
+          <button type="button" class="btn ghost" id="cam-cancel">Cancel</button>
+          <button type="button" class="btn primary big grow" id="cam-capture">Capture</button>
+        </div>
+        <div class="readout" id="readout" hidden>
+          <div class="readout-grid" id="readout-grid" aria-hidden="true"></div>
+          <p><span id="readout-label"></span><br><span class="muted small">Colors look off? Retake it in better light.</span></p>
+          <button type="button" class="btn small" id="readout-retake">Retake</button>
+        </div>
+      </div>
+
+      <div id="scan-review" class="stack" hidden>
+        <div>
+          <h2 id="review-title"></h2>
+          <p id="review-lead"></p>
+        </div>
+        <div class="card scramble-card" id="review-scramble" hidden>
+          <p class="scramble-text" id="review-scramble-text"></p>
+          <button type="button" class="btn small" id="review-new-scramble">New scramble</button>
+        </div>
+        <div class="card net-card">
+          <div id="net"></div>
+          <p class="note" id="net-legend">The net unfolds around the green face: red on its left, orange then blue on its right, yellow above, white below.</p>
+        </div>
+        <div class="status" id="review-status" role="status"></div>
+        <ul class="error-list" id="review-errors"></ul>
+        <div class="row wrap">
+          <button type="button" class="btn ghost" id="review-back">Start over</button>
+          <button type="button" class="btn primary big grow" id="coach-go" disabled>Looks right — coach me</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Coach ================= -->
+    <section class="panel" id="panel-coach" role="tabpanel" aria-labelledby="tab-coach" hidden>
+      <div id="coach-empty" class="stack empty-state">
+        <div class="empty-figure" aria-hidden="true" data-iso-cube></div>
+        <h2>No cube to coach yet</h2>
+        <p>Scan your cube, enter its colors, or grab a random scramble to follow along.</p>
+        <button type="button" class="btn primary big" data-go="scan">Scan my cube</button>
+        <button type="button" class="btn" id="empty-scramble">Try a random scramble</button>
+      </div>
+
+      <div id="coach-main" hidden>
+        <ol class="stage-strip" id="stage-strip" aria-label="Stages"></ol>
+        <div class="coach-grid">
+          <div class="viewer-col">
+            <div class="viewer-wrap">
+              <div class="viewer" id="viewer" role="img" aria-label="3D view of your cube"></div>
+              <button type="button" class="icon-btn view-reset" id="view-reset" aria-label="Reset the 3D view">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/></svg>
+              </button>
+            </div>
+            <p class="hold-tip">Hold your cube exactly like the 3D view (white bottom, green front to start) and make each move on it as it animates. <strong>y</strong> = turn the whole cube.</p>
+          </div>
+
+          <div class="coach-side">
+            <div class="card step-card" id="step-card">
+              <p class="eyebrow" id="step-eyebrow"></p>
+              <h2 id="stage-title"></h2>
+              <p class="badge" id="step-badge" hidden></p>
+              <p class="explain" id="step-explain"></p>
+              <div class="chips" id="chips"></div>
+              <p class="move-caption" id="move-caption"></p>
+              <div class="controls">
+                <button type="button" class="btn" id="btn-back" aria-keyshortcuts="ArrowLeft">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg><span>Back</span>
+                </button>
+                <button type="button" class="btn primary" id="btn-play" aria-keyshortcuts="P">
+                  <svg aria-hidden="true" viewBox="0 0 24 24" id="play-icon"><path d="M7 5v14l12-7L7 5Z"/></svg><span id="play-label">Play step</span>
+                </button>
+                <button type="button" class="btn" id="btn-next" aria-keyshortcuts="ArrowRight Space">
+                  <span id="next-label">Next step</span><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
+                </button>
+              </div>
+              <div class="speed-row">
+                <span class="muted small" id="speed-label">Speed</span>
+                <div class="segmented" role="group" aria-labelledby="speed-label" id="speed"></div>
+                <span class="kbd-hint">Keys: <kbd>←</kbd> <kbd>→</kbd> <kbd>P</kbd></span>
+              </div>
+            </div>
+
+            <details class="card lesson" id="lesson" open>
+              <summary><span id="lesson-summary">How this stage works</span></summary>
+              <div class="lesson-body" id="lesson-body"></div>
+            </details>
+
+            <div class="card celebrate" id="celebrate" hidden>
+              <div class="confetti" id="confetti" aria-hidden="true"></div>
+              <p class="eyebrow">All seven stages</p>
+              <h2>Solved. Nice work!</h2>
+              <p id="celebrate-text"></p>
+              <button type="button" class="btn primary big" data-go="practice">Solve it again faster → Practice</button>
+              <div class="row wrap">
+                <button type="button" class="btn" id="celebrate-restart">Replay from the start</button>
+                <button type="button" class="btn" data-go="scan">Coach another cube</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= Practice ================= -->
+    <section class="panel" id="panel-practice" role="tabpanel" aria-labelledby="tab-practice" hidden>
+      <div class="practice-grid">
+        <div class="stack timer-col">
+          <div class="card scramble-card">
+            <div class="scramble-head">
+              <span class="eyebrow">Scramble</span>
+              <button type="button" class="btn small ghost" id="new-scramble">New scramble</button>
+            </div>
+            <p class="scramble-text" id="scramble-text"></p>
+            <button type="button" class="linkish small" id="scramble-coach">Coach me through this scramble</button>
+          </div>
+
+          <div class="timer-area" id="timer-area" data-state="idle">
+            <div class="timer-display" id="timer-display" aria-hidden="true">0.00</div>
+            <div class="timer-penalty" id="timer-penalty"></div>
+            <p class="timer-hint" id="timer-hint"></p>
+          </div>
+
+          <label class="switch">
+            <input type="checkbox" role="switch" id="inspection-toggle">
+            <span class="switch-track" aria-hidden="true"></span>
+            <span>15-second inspection</span>
+          </label>
+
+          <dl class="stats" id="stats"></dl>
+        </div>
+
+        <div class="stack">
+          <section class="card" aria-labelledby="history-h">
+            <div class="section-head">
+              <h2 id="history-h">Your solves</h2>
+              <button type="button" class="btn small ghost" id="history-clear">Clear all</button>
+            </div>
+            <ol class="history" id="history" reversed></ol>
+            <p class="muted" id="history-empty">No solves yet. Scramble your cube, then start the timer.</p>
+          </section>
+
+          <section class="card" aria-labelledby="roadmap-h">
+            <h2 id="roadmap-h">Roadmap to getting faster</h2>
+            <ol class="roadmap" id="roadmap"></ol>
+            <h3>Speed tips by stage</h3>
+            <div id="speed-tips"></div>
+          </section>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <dialog class="sheet" id="notation" aria-labelledby="notation-h">
+    <div class="sheet-head">
+      <h2 id="notation-h">Learn the moves</h2>
+      <button type="button" class="icon-btn" id="notation-close" aria-label="Close">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <p class="muted">A letter names a face; the turn is clockwise as if you looked straight at that face. Tap a move to watch it.</p>
+    <div class="demo-viewer" id="demo-viewer" aria-hidden="true"></div>
+    <ul class="notation" id="notation-list"></ul>
+  </dialog>
+
+  <div class="sr-only" aria-live="polite" id="live"></div>
+  <noscript><p class="noscript">Cube Coach needs JavaScript to run.</p></noscript>
+</body>
+</html>

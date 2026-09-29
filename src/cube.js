@@ -210,6 +210,15 @@ export const EDGE_SLOTS = POSITIONS.filter((p) => nonzero(p) === 2).map((p) => {
   return { pos: p, stickers: ns.map((n) => stickerIndex(p, n)) };
 });
 
+// The 24 center layouts a real cube can show: SOLVED held in every orientation.
+const CENTER_LAYOUTS = new Set();
+for (const a of ['', 'x', 'x2', "x'", 'z', "z'"]) {
+  for (const b of ['', 'y', 'y2', "y'"]) {
+    const s = applyMoves(SOLVED, `${a} ${b}`);
+    CENTER_LAYOUTS.add(FACES.map((f, i) => s[i * 9 + 4]).join(''));
+  }
+}
+
 function permParity(perm) {
   const seen = new Array(perm.length).fill(false);
   let parity = 0;
@@ -235,6 +244,11 @@ export function validate(facelets) {
   }
   const ctr = centers(facelets);
   if (new Set(Object.values(ctr)).size !== 6) errors.push('Two centers have the same color.');
+  else if (!CENTER_LAYOUTS.has(FACES.map((f) => ctr[f]).join(''))) {
+    // Centers never move relative to each other; any other layout is a mirror image or a
+    // mis-scan and no amount of turning reaches it.
+    errors.push('The centers are not arranged like a real cube (two centers are swapped).');
+  }
   if (errors.length) return { ok: false, errors };
 
   // Reference pieces from the solved state *under these centers* (handles a rotated cube).
