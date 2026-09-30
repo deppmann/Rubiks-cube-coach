@@ -3,7 +3,9 @@
 import { SOLVED, COLOR_OF, applyMoves, applyMove, parseMoves, randomScramble, validate } from './cube.js';
 import { STAGES, solveBeginner } from './solver.js';
 import { LESSONS, NOTATION, ROADMAP } from './lessons.js';
-import { SCAN_ORDER, CameraScanner, classifyFaces } from './scanner.js';
+import { AutoCamera } from './autocam.js';
+import { FaceTray, buildCube } from './autoscan.js';
+import { COLOR_NAMES } from './colors.js';
 import { NetEditor, NET_HEX } from './netEditor.js';
 import { Timer, History, stats, formatTime, scrambleForPractice } from './practice.js';
 
@@ -143,9 +145,9 @@ function scrambledCube() {
 
 // ---- Scan ---------------------------------------------------------------------------
 
-const scan = { scanner: null, idx: 0, samples: {}, mode: null, scramble: null, running: false, starting: false };
+const scan = { cam: null, tray: new FaceTray(), mode: null, scramble: null, running: false, starting: false, errors: [], hintUntil: 0 };
 const net = new NetEditor($('#net'), { colorOf: COLOR_OF, editable: true });
-net.onChange(updateReview);
+net.onChange(() => { scan.errors = []; updateReview(); }); // a manual fix makes the scan's own messages stale
 
 function scanView(v) {
   for (const n of ['intro', 'camera', 'review']) $(`#scan-${n}`).hidden = n !== v;
@@ -159,37 +161,39 @@ function scanEnter() {
 }
 function scanLeave() { stopCamera(); }
 
+// Stops the stream and the detection loop (AutoCamera.stop cancels its animation frame).
 function stopCamera() {
-  if (scan.running) scan.scanner.stop();
+  if (scan.running) scan.cam.stop();
   scan.running = false;
 }
 
 async function startCamera({ fresh = true } = {}) {
   $('#cam-error').hidden = true;
-  if (fresh) {
-    scan.samples = {};
-    scan.idx = 0;
-    $('#readout').hidden = true;
-  }
+  if (fresh) scan.tray.clear();
   scanView('camera');
-  renderScanStep();
+  renderTray();
+  setHint('Looking for a cube face…');
   if (scan.starting) return; // a start is still pending; it picks this view up when it resolves
-  scan.scanner ??= new CameraScanner({ video: $('#cam-video'), overlay: $('#cam-overlay') });
+  scan.cam ??= new AutoCamera({
+    video: $('#cam-video'),
+    overlay: $('#cam-overlay'),
+    hooks: { onStatus: onScanStatus, onCapture },
+  });
+  scan.cam.tracker.reset();
   const btn = $('#cam-capture');
   btn.disabled = true;
   btn.textContent = 'Starting camera…';
   scan.starting = true;
   try {
-    await scan.scanner.start();
+    await scan.cam.start();
     scan.starting = false;
-    if ($('#scan-camera').hidden || currentTab !== 'scan') { scan.scanner.stop(); return; } // cancelled or left while starting
+    if ($('#scan-camera').hidden || currentTab !== 'scan') { scan.cam.stop(); return; } // cancelled or left while starting
     scan.running = true;
     btn.disabled = false;
-    btn.textContent = 'Capture';
-    btn.focus();
+    btn.textContent = 'Capture now';
   } catch (e) {
     scan.starting = false;
-    scan.scanner.stop();
+    scan.cam.stop();
     scanView('intro');
     const box = $('#cam-error');
     box.textContent = e.message;
@@ -197,51 +201,86 @@ async function startCamera({ fresh = true } = {}) {
   }
 }
 
-function renderScanStep() {
-  const step = SCAN_ORDER[scan.idx];
-  $('#scan-title-text').textContent = step.title;
-  $('#scan-swatch').style.background = NET_HEX[COLOR_OF[step.face]];
-  $('#scan-instr').textContent = step.instruction;
-  $('#scan-dots').replaceChildren(...SCAN_ORDER.map((o, i) => {
-    const got = scan.samples[o.face];
+// ---- Scan: hint line, color dots and the tray of captured sides
+
+const titleCase = (name) => name[0].toUpperCase() + name.slice(1);
+
+function setHint(text) { $('#cam-hint').textContent = text; }
+
+function onScanStatus({ phase, progress }) {
+  if (performance.now() < scan.hintUntil) return; // a capture message is still showing
+  if (phase === 'holding' && progress > 0) setHint('Hold steady…');
+  else if (phase === 'held') setHint('Got it. Show another side.');
+  else setHint(scan.tray.count === 6 ? 'All six sides captured.' : 'Looking for a cube face…');
+}
+
+function renderTray() {
+  const { tray } = scan;
+  const have = tray.slots.map((s) => s.name);
+  $('#scan-dots').replaceChildren(...COLOR_NAMES.map((name) => {
+    const got = have.includes(name);
+    const dot = el('li', { class: got ? 'done' : '', 'aria-label': `${titleCase(name)} ${got ? 'captured' : 'not captured yet'}` });
+    dot.style.setProperty('--dot', NET_HEX[name]);
+    return dot;
+  }));
+  $('#scan-instr').textContent = tray.count === 6
+    ? 'All six sides captured.'
+    : tray.count === 0 ? 'Any order. Keep white on the bottom when you can.'
+      : `${tray.count} of 6 sides. Any order, white on the bottom if you can.`;
+  const items = tray.slots.map((slot, i) => {
     const b = el('button', {
       type: 'button',
-      class: `${got ? 'done' : ''} ${i === scan.idx ? 'current' : ''}`,
-      'aria-label': `${o.title}${got ? ', captured, tap to retake' : i === scan.idx ? ', scanning now' : ', not scanned yet'}`,
-      'aria-current': i === scan.idx ? 'step' : null,
-      disabled: !got || i === scan.idx,
-      onclick: () => { scan.idx = i; renderScanStep(); },
-    });
-    if (got) b.style.setProperty('--dot', rgb(got[4]));
+      class: 'tray-slot',
+      'aria-label': `${titleCase(slot.name)} side captured. Tap to retake it.`,
+      onclick: () => retakeFace(i),
+    }, el('img', { src: slot.capture.thumb || '', alt: '' }), el('span', { class: 'tray-dot' }));
+    b.style.setProperty('--dot', NET_HEX[slot.name]);
     return el('li', {}, b);
-  }));
+  });
+  while (items.length < 6) items.push(el('li', {}, el('span', { class: 'tray-slot empty', 'aria-hidden': 'true' })));
+  $('#tray').replaceChildren(...items);
 }
 
-const rgb = ({ r, g, b }) => `rgb(${r},${g},${b})`;
-
-function capture() {
-  let s;
-  try { s = scan.scanner.sample(); } catch (e) { announce(e.message); return; }
-  const done = SCAN_ORDER[scan.idx];
-  scan.samples[done.face] = s;
-  // Show what was read so a bad frame can be retaken right away.
-  $('#readout-grid').replaceChildren(...s.map((c) => el('span', { style: `background:${rgb(c)}` })));
-  $('#readout-label').textContent = `${done.title} captured.`;
-  $('#readout-retake').onclick = () => { scan.idx = SCAN_ORDER.indexOf(done); renderScanStep(); $('#readout').hidden = true; };
-  $('#readout').hidden = false;
-  const next = SCAN_ORDER.findIndex((o) => !scan.samples[o.face]);
-  if (next < 0) return finishScan();
-  scan.idx = next;
-  renderScanStep();
-  announce(`${done.title} captured. Next: ${SCAN_ORDER[next].title}.`);
+function retakeFace(i) {
+  const name = scan.tray.slots[i]?.name;
+  if (!name) return;
+  scan.tray.remove(i);
+  scan.cam?.tracker.reset(); // so a side still in view can be captured again straight away
+  renderTray();
+  setHint(`Show the ${name} side again.`);
+  announce(`${titleCase(name)} side removed. Show it to the camera again.`);
 }
 
+function flash() {
+  const f = $('#cam-flash');
+  f.classList.remove('go');
+  void f.offsetWidth; // restart the animation
+  f.classList.add('go');
+}
+
+// A face was captured, automatically or by the Capture now button.
+function onCapture(capture, { manual = false } = {}) {
+  const e = scan.tray.offer(capture, { force: manual });
+  const title = titleCase(e.name);
+  const msg = e.kind === 'kept' ? `Already have the ${e.name} side. Show a different one.`
+    : e.kind === 'replaced' ? `${title} side updated.`
+      : `${title} side captured (${scan.tray.count} of 6).`;
+  if (e.kind !== 'kept') flash();
+  setHint(msg);
+  scan.hintUntil = performance.now() + 1200;
+  announce(msg);
+  renderTray();
+  if (scan.tray.count === 6) setTimeout(finishScan, 700); // let the last capture register
+}
+
+// Six faces are in: read the colors, work out which is which and how each is turned, then hand
+// the result to the review net (with doubtful stickers flagged and any problems spelled out).
 function finishScan() {
+  if (scan.tray.count < 6 || $('#scan-camera').hidden) return;
   stopCamera();
-  const { facelets, confidence } = classifyFaces(scan.samples);
-  // Low margin between the best and second-best color: worth a second look.
-  const doubtful = confidence.flatMap((c, i) => (c < 0.2 && i % 9 !== 4 ? [i] : []));
-  openReview('camera', facelets, doubtful);
+  const res = buildCube(scan.tray.captures());
+  scan.errors = res.ok ? [] : res.errors;
+  openReview('camera', res.facelets, res.flags);
 }
 
 const REVIEW_COPY = {
@@ -292,12 +331,16 @@ function updateReview() {
   const status = $('#review-status');
   status.className = `status ${v.ok ? 'ok' : 'bad'}`;
   status.textContent = v.ok ? 'This is a valid cube. Ready when you are.' : 'This cube can’t exist yet. Here is what to check:';
-  $('#review-errors').replaceChildren(...(v.ok ? [] : v.errors.map((e) => el('li', {}, humanize(e)))));
+  // Problems the scan itself found (missing or repeated colors, faces that don't fit) come first.
+  const scanErrors = scan.mode === 'camera' && !v.ok ? scan.errors : [];
+  $('#review-errors').replaceChildren(...(v.ok ? [] : [...scanErrors, ...v.errors.map(humanize)].map((e) => el('li', {}, e))));
   $('#coach-go').disabled = !v.ok;
 }
 
 $('#cam-start').addEventListener('click', () => startCamera());
-$('#cam-capture').addEventListener('click', capture);
+$('#cam-capture').addEventListener('click', () => {
+  try { scan.cam.captureNow(); } catch (e) { announce(e.message); }
+});
 $('#cam-cancel').addEventListener('click', () => scanView('intro'));
 $('#manual-start').addEventListener('click', () => openReview('manual', SOLVED));
 $('#scramble-start').addEventListener('click', newScrambleReview);

@@ -182,37 +182,44 @@ kbd { font: 600 0.75rem var(--mono); padding: 1px 6px; border-radius: 6px; borde
 .hold-figure { width: 96px; height: 96px; flex: none; }
 .alt-actions { display: grid; gap: 10px; }
 
-.scan-head h2 { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+.scan-head h2 { margin-top: 4px; }
 .scan-head p { margin-top: 6px; color: var(--muted); }
 #review-lead { margin-top: 6px; color: var(--muted); }
-.face-swatch { width: 22px; height: 22px; border-radius: 6px; border: 1px solid rgba(0, 0, 0, 0.35); flex: none; }
-/* Six 44px dots need 264px: spread them instead of a fixed gap so they fit a 320px phone. */
-.scan-dots { display: flex; justify-content: space-between; max-width: 304px; list-style: none; margin: 0; padding: 0; }
-.scan-dots button {
-  width: 44px; height: 44px; padding: 0; border: 0; background: none; cursor: pointer;
-  display: grid; place-items: center; border-radius: 50%;
+/* Six color dots, hollow until that color has been captured. */
+.scan-dots { display: flex; gap: 14px; list-style: none; margin: 12px 0 0; padding: 0; }
+.scan-dots li {
+  width: 22px; height: 22px; border-radius: 50%; flex: none;
+  border: 2px solid var(--dot); background: transparent;
+  transition: background 0.2s, transform 0.2s;
 }
-.scan-dots button::before {
-  content: ""; width: 18px; height: 18px; border-radius: 50%;
-  background: var(--surface-3); border: 2px solid transparent;
-  box-shadow: 0 0 0 1px var(--border);
-}
-.scan-dots button.done::before { background: var(--dot); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3); }
-.scan-dots button.current::before { border-color: var(--bg); box-shadow: 0 0 0 3px var(--accent-text); }
-.scan-dots button:disabled { cursor: default; }
+.scan-dots li.done { background: var(--dot); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3); transform: scale(1.12); }
 
 .cam-frame {
-  position: relative; aspect-ratio: 1; width: 100%; max-width: min(520px, 50vh); margin: 0 auto;
+  position: relative; aspect-ratio: 1; width: 100%; max-width: min(520px, 46vh); margin: 0 auto;
   background: #000; border-radius: var(--radius); overflow: hidden;
 }
 .cam-frame video { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cam-frame canvas { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.cam-hint { position: absolute; left: 0; right: 0; bottom: 10px; text-align: center; color: #fff; font-size: 0.85rem; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8); }
+.cam-hint {
+  position: absolute; left: 12px; right: 12px; bottom: 10px; margin: 0; text-align: center; color: #fff; font-size: 0.95rem;
+  font-weight: 600; text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9), 0 0 8px rgba(0, 0, 0, 0.6);
+}
+.cam-flash { position: absolute; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+.cam-flash.go { animation: cam-flash 0.35s ease-out; }
+@keyframes cam-flash { 0% { opacity: 0.75; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cam-flash.go { animation: none; } }
 
-.readout { display: flex; align-items: center; gap: 14px; padding: 12px; border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--border); }
-.readout p { flex: 1; font-size: 0.95rem; }
-.readout-grid { display: grid; grid-template-columns: repeat(3, 16px); gap: 3px; padding: 4px; background: #14161b; border-radius: 8px; flex: none; }
-.readout-grid span { width: 16px; height: 16px; border-radius: 4px; }
+/* The six captured sides: tap one to retake it. 54px+ each even on a 320px phone. */
+.tray { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; list-style: none; margin: 0; padding: 0; }
+.tray li { min-width: 0; }
+.tray-slot {
+  position: relative; display: block; width: 100%; aspect-ratio: 1; padding: 0; border-radius: 10px; overflow: hidden;
+  border: 2px solid var(--border); background: var(--surface-2); cursor: pointer; touch-action: manipulation;
+}
+button.tray-slot { border-color: var(--dot); }
+.tray-slot.empty { border-style: dashed; cursor: default; }
+.tray-slot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tray-dot { position: absolute; right: 3px; bottom: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--dot); border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5); }
 
 .net-card { padding: 16px 8px; }
 /* netEditor sizes cells for a full-width container; the card's padding and border take 18px more. */
