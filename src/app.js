@@ -3,8 +3,10 @@
 import { SOLVED, COLOR_OF, applyMoves, applyMove, parseMoves, randomScramble, validate } from './cube.js';
 import { STAGES, solveBeginner } from './solver.js';
 import { LESSONS, NOTATION, ROADMAP } from './lessons.js';
+import * as lessonsApi from './lessons.js'; // namespace import: gripFor may not exist yet, and that must not break the app
 import { AutoCamera } from './autocam.js';
 import { FaceTray, buildCube } from './autoscan.js';
+import { paletteFromScan, classifyWithPalette, validPalette, diagnose } from './checkpoint.js';
 import { COLOR_NAMES } from './colors.js';
 import { NetEditor, NET_HEX } from './netEditor.js';
 import { Timer, History, stats, formatTime, scrambleForPractice } from './practice.js';
@@ -145,6 +147,7 @@ function scrambledCube() {
 
 // ---- Scan ---------------------------------------------------------------------------
 
+const PALETTE_KEY = 'rcc.palette';
 const scan = { cam: null, tray: new FaceTray(), mode: null, scramble: null, running: false, starting: false, errors: [], hintUntil: 0 };
 const net = new NetEditor($('#net'), { colorOf: COLOR_OF, editable: true });
 net.onChange(() => { scan.errors = []; updateReview(); }); // a manual fix makes the scan's own messages stale
@@ -168,6 +171,7 @@ function stopCamera() {
 }
 
 async function startCamera({ fresh = true } = {}) {
+  closeCheck(); // one camera at a time: the coach's check camera hands over to the scan
   $('#cam-error').hidden = true;
   if (fresh) scan.tray.clear();
   scanView('camera');
@@ -280,6 +284,11 @@ function finishScan() {
   stopCamera();
   const res = buildCube(scan.tray.captures());
   scan.errors = res.ok ? [] : res.errors;
+  // Remember this cube's own six colors (and this light) so the coach's camera checks can use them.
+  if (res.ok) {
+    const pal = paletteFromScan(scan.tray.captures(), res.names, res.confidence);
+    if (pal) save(PALETTE_KEY, pal);
+  }
   openReview('camera', res.facelets, res.flags);
 }
 
@@ -369,6 +378,7 @@ if (!SPEEDS.includes(coach.speed)) coach.speed = 1;
 const LABELS = Array.from({ length: 54 }, (_, i) => String.fromCharCode(0x100 + i)).join('');
 
 function coachLoad(facelets, restore) {
+  closeCheck();
   const res = solveBeginner(facelets);
   coach.token++;
   coach.playing = false;
@@ -453,6 +463,7 @@ async function makeViewer(container, opts) {
 function ensureViewer() {
   coach.viewerP ??= makeViewer($('#viewer'), { colorOf: COLOR_OF }).then((v) => {
     coach.viewer = v;
+    initHands(v);
     syncViewer();
     return v;
   });
@@ -472,11 +483,16 @@ function coachEnter() {
   ensureViewer();
   renderCoach();
 }
-function coachLeave() { cancelPlay(); }
+function coachLeave() { cancelPlay(); closeCheck(); }
 
 // Stop whatever is animating and snap the view to the logical position.
 function cancelPlay() {
   coach.token++;
+  if (check.fixing) { // a "Show fix" animation is cut short: back to the plan
+    check.fixing = false;
+    coach.viewer?.stop();
+    checkIdle();
+  }
   if (coach.playing) {
     coach.playing = false;
     coach.viewer?.stop();
@@ -488,6 +504,7 @@ function goStep(pos) {
   cancelPlay();
   coach.pos = Math.max(0, Math.min(coach.flat.length, pos));
   coach.applied = 0;
+  checkStepChanged();
   saveCoach();
   syncViewer();
   renderCoach();
@@ -509,6 +526,7 @@ async function playRange(from, to) {
   coach.applied = from;
   syncViewer(); // also undoes a turn that stop() may have just finished
   coach.playing = true;
+  checkPlayStarted();
   renderControls();
   while (coach.applied < to && token === coach.token) {
     const k = coach.applied;
@@ -530,6 +548,7 @@ async function playRange(from, to) {
   viewer.setHint(null);
   renderChips();
   renderControls();
+  checkPlayFinished();
 }
 
 function togglePlay() {
@@ -569,6 +588,7 @@ function renderCoach() {
   $('#lesson').hidden = done;
   $('#celebrate').hidden = !done;
   if (done) {
+    closeCheck();
     renderCelebrate(!coach.wasDone);
     coach.wasDone = true;
     coach.viewer?.setHighlight(null);
@@ -591,6 +611,7 @@ function renderCoach() {
   $('#step-explain').textContent = e.step.explain;
   renderChips();
   renderControls();
+  renderCheckButton();
 }
 
 function renderChips() {
@@ -608,6 +629,10 @@ function renderChips() {
     onclick: () => playRange(k, k + 1),
   }, m)));
   const cap = $('#move-caption');
+  const grip = $('#grip');
+  const g = coach.applied < moves.length ? gripText(moves[coach.applied]) : '';
+  grip.hidden = !g;
+  grip.textContent = g;
   if (!moves.length) cap.textContent = 'Nothing to turn here. Tap Next step.';
   else if (coach.applied >= moves.length) cap.textContent = 'Step done. Your cube should match the 3D view. Tap Next step.';
   else {
@@ -687,6 +712,337 @@ function coachKey(e) {
   else if (e.key === 'ArrowLeft') { e.preventDefault(); back(); }
   else if (e.key === 'p' || e.key === 'P') { e.preventDefault(); togglePlay(); }
 }
+
+// ---- Coach: hands and grips (optional pieces of viewer3d.js / lessons.js) -------------
+
+const handsPref = () => load('rcc.hands', true) !== false;
+
+// The viewer may or may not be able to draw hands; show the toggle only when it can.
+function setHandsUi(on) {
+  const b = $('#hands-toggle');
+  b.setAttribute('aria-checked', String(on));
+  $('#hands-state').textContent = on ? 'on' : 'off';
+}
+function initHands(v) {
+  const btn = $('#hands-toggle');
+  const can = typeof v?.setHands === 'function';
+  btn.hidden = !can;
+  if (!can) return;
+  const on = handsPref();
+  setHandsUi(on);
+  try { v.setHands(on); } catch (e) { console.warn('hands unavailable', e); btn.hidden = true; }
+}
+$('#hands-toggle').addEventListener('click', () => {
+  const on = $('#hands-toggle').getAttribute('aria-checked') !== 'true';
+  save('rcc.hands', on);
+  setHandsUi(on);
+  try { coach.viewer?.setHands?.(on); } catch (err) { console.warn('hands unavailable', err); }
+});
+
+// "Right index finger flicks the top toward you": one sentence per move, when lessons.js has it.
+function gripText(move) {
+  if (typeof lessonsApi.gripFor !== 'function') return '';
+  try {
+    const g = lessonsApi.gripFor(move);
+    if (typeof g === 'string') return g;
+    return g?.text ?? g?.sentence ?? g?.grip ?? '';
+  } catch { return ''; }
+}
+
+// ---- Coach: camera check ------------------------------------------------------------
+// The face pointing at the camera should equal the F face of the step's expected state (cube held
+// white bottom, green front, as the 3D view shows). checkpoint.js turns what the camera sees into
+// a verdict; this is only the camera, the banner and the buttons.
+
+const CHECK_HOLD_MS = 400;   // how long the face must hold still before it is read
+const ADVANCE_MS = 1400;     // Auto-check: how long "Matches" shows before moving to the next step
+const check = {
+  cam: null, open: false, starting: false, running: false, suspended: false, gen: 0,
+  auto: false, paused: false, fixing: false, wantTop: false, front: null, top: null,
+  result: null, advance: 0, pendingPos: -1,
+};
+const checkPalette = () => validPalette(load(PALETTE_KEY, null));
+
+const V_ICON = { ok: '✓', partial: '◐', mistake: '✗', unknown: '?', idle: '…' };
+function setVerdict(kind, title, text, actions = [], { stale = false } = {}) {
+  const box = $('#check-verdict');
+  box.dataset.kind = kind;
+  box.dataset.stale = String(stale);
+  $('#v-icon').textContent = V_ICON[kind] ?? '…';
+  $('#v-title').textContent = title;
+  $('#v-text').textContent = text;
+  $('#v-text').hidden = !text;
+  $('#check-actions').replaceChildren(...actions.map((a) => el('button', {
+    type: 'button', class: `btn${a.primary ? ' primary' : ''}`, onclick: a.run,
+  }, a.label)));
+}
+const setCamHint = (t) => { $('#check-hint').textContent = t; };
+
+function checkIdle(title = 'Ready to check', text = 'Hold the front face up to the camera and keep it still.') {
+  clearTimeout(check.advance);
+  check.result = null;
+  setVerdict('idle', title, text);
+}
+
+function renderCheckButton() {
+  const btn = $('#check-open');
+  btn.disabled = !entry();
+  btn.setAttribute('aria-expanded', String(check.open));
+  $('#check-open-label').textContent = check.open ? 'Turn camera off' : 'Check with camera';
+}
+
+async function openCheck() {
+  if (!coach.start || isDone() || check.open) return;
+  stopCamera(); // one camera at a time (the Scan tab's stream, if it is somehow still on)
+  check.open = true;
+  check.paused = false;
+  $('#check-panel').hidden = false;
+  document.body.classList.add('checking');
+  renderCheckButton();
+  checkIdle();
+  keepChipsClear();
+  await startCheckCamera();
+}
+
+async function startCheckCamera() {
+  if (check.starting || check.running || !check.open) return;
+  const gen = ++check.gen;
+  check.starting = true;
+  setCamHint('Starting camera…');
+  check.cam ??= new AutoCamera({
+    video: $('#check-video'), overlay: $('#check-overlay'), vibrate: false, holdMs: CHECK_HOLD_MS,
+    hooks: { onStatus: onCheckStatus, onCapture: onCheckCapture },
+  });
+  check.cam.tracker.reset();
+  try {
+    await check.cam.start();
+  } catch (err) {
+    check.starting = false;
+    check.cam.stop();
+    if (gen !== check.gen) return;
+    setCamHint('');
+    setVerdict('unknown', 'Camera unavailable', err.message, [{ label: 'Close', run: closeCheck }]);
+    return;
+  }
+  check.starting = false;
+  if (gen !== check.gen || !check.open || currentTab !== 'coach' || document.hidden) { check.cam.stop(); return; } // closed while starting
+  check.running = true;
+  setCamHint('Show the front face');
+}
+
+function stopCheckCamera() {
+  check.gen++;                 // a start still in flight sees this and shuts itself down
+  if (check.running || check.starting) check.cam?.stop();
+  check.running = false;
+  check.starting = false;
+}
+
+function closeCheck() {
+  const wasOpen = check.open;
+  stopCheckCamera();
+  clearTimeout(check.advance);
+  check.open = false;
+  check.suspended = false;
+  check.paused = false;
+  check.wantTop = false;
+  check.front = check.top = check.result = null;
+  if (check.fixing) { check.fixing = false; coach.viewer?.stop(); coach.token++; syncViewer(); }
+  $('#check-panel').hidden = true;
+  document.body.classList.remove('checking');
+  if (wasOpen) renderCheckButton();
+}
+
+// The page went to the background: the camera must not stay on. Coming back turns it on again.
+function suspendCheck() {
+  if (!check.open || check.suspended) return;
+  check.suspended = true;
+  stopCheckCamera();
+  setCamHint('Camera paused');
+}
+function resumeCheck() {
+  if (!check.open || !check.suspended || document.hidden || currentTab !== 'coach') return;
+  check.suspended = false;
+  startCheckCamera();
+}
+document.addEventListener('visibilitychange', () => (document.hidden ? suspendCheck() : resumeCheck()));
+window.addEventListener('pagehide', suspendCheck);
+
+// When the panel opens on a phone the dock grows; scroll just enough that the step's moves stay visible above it.
+function keepChipsClear() {
+  if (matchMedia('(min-width: 900px)').matches) return;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const grip = $('#grip');
+    const cap = (grip.hidden ? $('#move-caption') : grip).getBoundingClientRect();
+    const dock = $('#dock').getBoundingClientRect();
+    const need = cap.bottom + 10 - dock.top;
+    if (need > 0) window.scrollBy({ top: need, behavior: 'instant' });
+  }));
+}
+
+function onCheckStatus({ phase, progress }) {
+  if (check.paused || check.fixing) return;
+  if (phase === 'holding' && progress > 0) {
+    setCamHint('Hold steady…');
+    if (check.result) $('#check-verdict').dataset.stale = 'true'; // the cube is moving: the old verdict is out of date
+  } else if (phase === 'held') setCamHint(check.wantTop ? 'Got the top' : 'Got it');
+  else setCamHint(check.wantTop ? 'Show the top face' : 'Show the front face');
+}
+
+function onCheckCapture(capture) {
+  if (!check.open || check.paused || check.fixing || currentTab !== 'coach') return;
+  if (coach.playing) { check.cam.tracker.reset(); return; } // still animating: read it after the moves
+  if (!entry()) return;
+  const cls = classifyWithPalette(capture.cells, checkPalette(), { centerRing: capture.centerRing });
+  if (check.wantTop) {
+    check.wantTop = false;
+    check.top = cls;
+  } else {
+    check.front = cls;
+    check.top = null;
+  }
+  runDiagnosis();
+}
+
+function runDiagnosis() {
+  const e = entry();
+  if (!e || !check.front) return;
+  const opts = { colorOf: COLOR_OF, confidence: check.front.confidence };
+  if (check.top) { opts.observedTop = check.top.names; opts.topConfidence = check.top.confidence; }
+  const d = diagnose(e.before, e.step.moves, check.front.names, opts);
+  check.result = d;
+  showResult(d);
+}
+
+function tryAgain() {
+  clearTimeout(check.advance);
+  check.paused = false;
+  check.wantTop = false;
+  check.front = check.top = check.result = null;
+  check.cam?.tracker.reset();
+  setCamHint('Show the front face');
+  checkIdle();
+}
+
+function askForTop() {
+  clearTimeout(check.advance);
+  check.wantTop = true;
+  check.paused = false;
+  check.cam?.tracker.reset();
+  setCamHint('Show the top face');
+  setVerdict('idle', 'Now show the top', `Tip the cube toward the camera so the ${COLOR_OF.U} center faces you, with the green side at the bottom of the picture.`);
+}
+
+function showResult(d) {
+  const e = entry();
+  const n = e.step.moves.length;
+  const again = { label: 'Check again', run: tryAgain };
+  check.paused = !check.auto; // manual mode: one reading, then wait for "Check again"
+  if (check.paused) setCamHint('');
+  const last = coach.pos === coach.flat.length - 1;
+  const nextBtn = { label: last ? 'Finish' : 'Next step', primary: true, run: () => { clearTimeout(check.advance); next(); } };
+
+  if (d.verdict === 'ok') {
+    navigator.vibrate?.(d.blind ? 20 : [30, 60, 40]);
+    const text = d.message.replace(/^Matches — nice!\s*/, '') || 'Your cube matches the 3D view.';
+    const moveOn = check.auto && !d.blind && n > 0;
+    setVerdict('ok', d.blind ? 'Front looks right' : 'Matches — nice!', moveOn ? `${text} Moving on…` : text,
+      [nextBtn, ...(d.blind && !check.top ? [{ label: 'Show top too', run: askForTop }] : []), ...(check.auto ? [] : [again])]);
+    clearTimeout(check.advance);
+    if (moveOn) {
+      check.pendingPos = coach.pos;
+      check.advance = setTimeout(() => { if (check.open && coach.pos === check.pendingPos && !check.fixing) next(); }, ADVANCE_MS);
+    }
+  } else if (d.verdict === 'partial') {
+    check.paused = false; // part way is not a final answer: keep watching
+    if (d.matched !== coach.applied && !coach.playing) { // let the chips and the 3D cube follow the real cube
+      coach.applied = d.matched;
+      saveCoach();
+      syncViewer();
+      renderChips();
+      renderControls();
+    }
+    setVerdict('partial', d.matched === 0 ? 'Ready when you are' : 'Partway there', d.message,
+      [{ label: d.matched === 0 ? 'Show the moves' : 'Show next moves', run: () => playRange(d.matched, n) }]);
+  } else if (d.verdict === 'mistake') {
+    navigator.vibrate?.(80);
+    const actions = [];
+    if (d.fixMoves.length) actions.push({ label: 'Show fix', primary: true, run: () => showFix(d) });
+    if (d.needsTop) actions.push({ label: 'Show top face', primary: true, run: askForTop });
+    actions.push(again);
+    check.paused = !check.auto;
+    setVerdict('mistake', 'Not quite', d.message, actions);
+  } else {
+    check.paused = !check.auto;
+    setVerdict('unknown', 'Can’t match that', d.message, [{ label: 'Try again', primary: true, run: tryAgain }]);
+  }
+  if (check.auto && d.verdict !== 'ok') check.cam?.tracker.reset();
+}
+
+// "Show fix": the 3D cube jumps to the state the camera saw, turns the fix moves, then snaps back to the plan.
+async function showFix(d) {
+  const viewer = await ensureViewer();
+  cancelPlay();
+  const token = ++coach.token;
+  check.fixing = true;
+  check.paused = false;
+  clearTimeout(check.advance);
+  const fix = d.fixMoves;
+  setVerdict('mistake', 'Here’s the fix', `The 3D cube now shows what the camera saw. Turn ${fix.join(' ')} to get back on track.`, []);
+  viewer.setState(d.actual);
+  viewer.setHint(null);
+  viewer.setHighlight(null);
+  announce(`Fix: ${fix.join(', ')}.`);
+  await wait(reducedMotion() ? 900 : 500);
+  for (const mv of fix) {
+    if (token !== coach.token) return;
+    viewer.setHint(mv);
+    await wait((reducedMotion() ? 700 : 450) / coach.speed);
+    if (token !== coach.token) return;
+    await viewer.play([mv], { speed: coach.speed });
+  }
+  if (token !== coach.token) return;
+  viewer.setHint(null);
+  await wait(800);
+  if (token !== coach.token) return;
+  check.fixing = false;
+  syncViewer(); // snap back into the plan
+  setVerdict('idle', 'Back on the plan', `After ${fix.join(' ')} your cube matches the 3D view again. ${check.auto ? 'I’ll check again when you hold it still.' : 'Tap Check again to make sure.'}`,
+    check.auto ? [] : [{ label: 'Check again', primary: true, run: tryAgain }]);
+  check.paused = !check.auto;
+  check.cam?.tracker.reset();
+}
+
+// Hooks called by the coach: a new step, Play pressed, Play finished.
+function checkStepChanged() {
+  if (!check.open) return;
+  check.paused = false;
+  check.wantTop = false;
+  check.front = check.top = null;
+  check.cam?.tracker.reset();
+  checkIdle('Next step', 'Make the moves and hold the cube still. I’ll check it.');
+  renderCheckButton();
+}
+function checkPlayStarted() {
+  if (!check.open || check.fixing) return;
+  check.paused = false;
+  check.front = check.top = null;
+  checkIdle('Follow along', 'Make the moves with the 3D cube, then hold the cube still.');
+}
+function checkPlayFinished() {
+  if (!check.open) return;
+  check.cam?.tracker.reset(); // read the cube fresh, after the moves
+}
+
+$('#check-open').addEventListener('click', () => (check.open ? closeCheck() : openCheck()));
+$('#check-close').addEventListener('click', closeCheck);
+$('#check-auto').addEventListener('change', (e) => {
+  check.auto = e.target.checked;
+  if (check.auto) {
+    check.paused = false;
+    if (!check.open) openCheck();
+    else tryAgain();
+  }
+});
 
 // ---- Practice -----------------------------------------------------------------------
 

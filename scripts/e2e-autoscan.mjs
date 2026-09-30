@@ -121,6 +121,9 @@ if (reviewOpen) {
   ok = ok && canGo && got === cube;
   await page.screenshot({ path: shot ? shot.replace(/\.png$/, '-review.png') : '/dev/null' }).catch(() => {});
 }
+const palette = await page.evaluate(() => { try { return JSON.parse(localStorage.getItem('rcc.palette')); } catch { return null; } });
+console.log('color palette saved for the coach camera checks:', !!palette && palette.source === 'scan' && Object.keys(palette.lab).length === 6);
+ok = ok && !!palette && palette.source === 'scan';
 const still = await page.evaluate(() => !!document.querySelector('#cam-video')?.srcObject);
 console.log('camera stream stopped after the scan:', !still);
 ok = ok && !still;

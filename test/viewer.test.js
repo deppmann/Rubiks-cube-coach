@@ -20,7 +20,7 @@ test('sticker transforms are pos*spacing + normal*half', () => {
 
 test('STICKER_HEX covers every coach color', () => {
   for (const name of Object.values(COLOR_OF)) assert.match(STICKER_HEX[name], /^#[0-9a-f]{6}$/);
-  assert.equal(stickerHex('D'), '#ffffff');
+  assert.equal(stickerHex('D'), STICKER_HEX.white);
   assert.equal(stickerHex('?'), '#59606d');
 });
 
