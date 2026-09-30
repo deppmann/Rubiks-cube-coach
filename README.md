@@ -19,8 +19,10 @@ GitHub Actions).
 
 ## How it works
 
-1. **Scan** — hold the cube white-side-down, green facing you, and show each face to the
-   camera. Tap any sticker to fix a misread color.
+1. **Scan** — turn the cube slowly in front of the camera. The app finds the cube anywhere in
+   the picture and captures each side once you hold it steady; any order, any angle. It works
+   out which side is which from the colors, then shows a net where you can tap any sticker to
+   fix a misread color.
 2. **Coach** — seven stages of the beginner method: white cross, white corners, middle
    layer, yellow cross, yellow edges, position yellow corners, twist yellow corners.
    Every step shows the moves, animates them, and says why.

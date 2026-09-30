@@ -11,6 +11,11 @@ src/
   solver.js     Beginner layer-by-layer solver, white cross on the bottom     (pure, tested)
   lessons.js    Teaching content for each stage + speed tips                  (pure data)
   scanner.js    Camera capture + color classification                         (DOM + pure core, tested)
+  detect.js     Finds the 3x3 face anywhere in a frame, samples cells + center ring (pure, tested)
+  colors.js     White-balanced balanced clustering of 54 stickers into 6 colors (pure, tested)
+  assemble.js   Faces in any order/rotation → valid facelets (searches 4^6)       (pure, tested)
+  autoscan.js   Stability tracker + 6-slot face tray for auto-capture             (pure, tested)
+  autocam.js    Camera + detect loop + overlay drawing for the Scan tab           (DOM)
   netEditor.js  2D cube net: shows a state, tap a sticker to fix its color    (DOM)
   viewer3d.js   Three.js cube: animated moves, arrows, piece highlighting     (DOM/WebGL)
   practice.js   Speed timer, inspection, stats (ao5/ao12), solve history      (pure core, tested)
@@ -61,6 +66,20 @@ export const LESSONS = { [stageId]: {
   goal: string, recognize: string, algorithms: [{ name, moves, when }], tips: string[], speedTips: string[],
 } };
 ```
+
+### detect.js / colors.js / assemble.js / autoscan.js (auto-capture scan)
+```js
+detectFace(imageData, { prev }) → { found, cells: [9 rgb], centerRing: rgb, score, … }  // anywhere, ±25° tilt
+classifyStickers(faces[6][9 rgb], { centerRings }) → { names[6][9], confidence[6][9], centers[6], centerAlternatives }
+assembleCube(names, { preferredRotations, centerAlternatives }) → { ok, facelets, rotations[6], distinct, errors }
+new FaceTracker()  // "held steady for ~0.5 s" → capture;  new FaceTray()  // 6 slots keyed by center color
+buildCube(captures, { preferredRotations }) → classify + assemble, with doubtful stickers flagged
+```
+Faces may be shown in any order and any 90° turn; identity comes from the center color and
+orientation from the only rotation combination that forms a valid cube. Center colors come from
+a ring around the cap, because speed cubes print a logo on the white center.
+`scripts/check-video.mjs` replays the whole pipeline over a folder of video frames (local only;
+never commit user photos or video).
 
 ### scanner.js
 ```js
