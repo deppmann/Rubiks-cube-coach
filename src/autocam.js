@@ -16,10 +16,12 @@ const rgbCss = ({ r, g, b }) => `rgb(${r},${g},${b})`;
 
 export class AutoCamera extends CameraScanner {
   // hooks: { onStatus({ phase, progress, det }), onCapture(capture, { manual }) }
-  constructor({ video, overlay, hooks = {} }) {
+  // options: vibrate (default true) buzzes on every capture; holdMs sets how long a face must hold still.
+  constructor({ video, overlay, hooks = {}, vibrate = true, holdMs } = {}) {
     super({ video, overlay });
     this.hooks = hooks;
-    this.tracker = new FaceTracker();
+    this.vibrate = vibrate;
+    this.tracker = new FaceTracker(holdMs ? { holdMs } : {});
     this.det = null;            // last detection, in coordinates of the visible region scaled to `small`
     this.small = null;          // the small canvas detectFace reads
     this.phase = 'searching';
@@ -88,7 +90,7 @@ export class AutoCamera extends CameraScanner {
     try { this._sharpen(capture, det); } catch (e) { console.warn('full-detail read failed', e); }
     capture.thumb = this._thumbnail(det);
     this.flashUntil = performance.now() + 350;
-    navigator.vibrate?.(40);
+    if (this.vibrate) navigator.vibrate?.(40);
     this.hooks.onCapture?.(capture, { manual });
   }
 

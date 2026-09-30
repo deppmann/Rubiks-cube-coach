@@ -119,6 +119,14 @@
               <button type="button" class="icon-btn view-reset" id="view-reset" aria-label="Reset the 3D view">
                 <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4h4"/></svg>
               </button>
+              <button type="button" class="view-pill view-check" id="check-open" aria-expanded="false" aria-controls="check-panel">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6H8l1.5-2h5L16 6h2.5A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5v-9Z"/><circle cx="12" cy="13" r="3.5"/></svg>
+                <span id="check-open-label">Check with camera</span>
+              </button>
+              <button type="button" class="view-pill view-hands" id="hands-toggle" role="switch" aria-checked="true" hidden>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V12M11 11V4a1.5 1.5 0 0 1 3 0v8M14 11.5V6a1.5 1.5 0 0 1 3 0v8.5c0 3.6-2.4 6-5.5 6-2.4 0-3.8-1-5-3l-2.3-3.8a1.4 1.4 0 0 1 2.3-1.6L8 14"/></svg>
+                <span>Hands <b id="hands-state">on</b></span>
+              </button>
             </div>
             <p class="hold-tip">Hold your cube exactly like the 3D view (white bottom, green front to start) and make each move on it as it animates. <strong>y</strong> = turn the whole cube.</p>
           </div>
@@ -131,16 +139,43 @@
               <p class="explain" id="step-explain"></p>
               <div class="chips" id="chips"></div>
               <p class="move-caption" id="move-caption"></p>
-              <div class="controls">
-                <button type="button" class="btn" id="btn-back" aria-keyshortcuts="ArrowLeft">
-                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg><span>Back</span>
-                </button>
-                <button type="button" class="btn primary" id="btn-play" aria-keyshortcuts="P">
-                  <svg aria-hidden="true" viewBox="0 0 24 24" id="play-icon"><path d="M7 5v14l12-7L7 5Z"/></svg><span id="play-label">Play step</span>
-                </button>
-                <button type="button" class="btn" id="btn-next" aria-keyshortcuts="ArrowRight Space">
-                  <span id="next-label">Next step</span><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
-                </button>
+              <p class="grip" id="grip" hidden></p>
+              <div class="dock" id="dock">
+                <section class="check-panel" id="check-panel" aria-label="Camera check" hidden>
+                  <div class="check-left">
+                    <div class="check-cam">
+                      <video id="check-video" muted playsinline autoplay></video>
+                      <canvas id="check-overlay" aria-hidden="true"></canvas>
+                      <p class="check-hint" id="check-hint" aria-hidden="true"></p>
+                      <button type="button" class="check-close" id="check-close" aria-label="Turn the camera off">
+                        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></svg>
+                      </button>
+                    </div>
+                    <label class="switch small-switch" id="auto-switch">
+                      <input type="checkbox" role="switch" id="check-auto">
+                      <span class="switch-track" aria-hidden="true"></span>
+                      <span>Auto-check</span>
+                    </label>
+                  </div>
+                  <div class="check-body">
+                    <div class="verdict" id="check-verdict" data-kind="idle" role="status" aria-live="polite" aria-atomic="true">
+                      <p class="v-title"><span class="v-icon" id="v-icon" aria-hidden="true"></span><span id="v-title"></span></p>
+                      <p class="v-text" id="v-text"></p>
+                    </div>
+                    <div class="check-actions" id="check-actions"></div>
+                  </div>
+                </section>
+                <div class="controls">
+                  <button type="button" class="btn" id="btn-back" aria-keyshortcuts="ArrowLeft">
+                    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg><span>Back</span>
+                  </button>
+                  <button type="button" class="btn primary" id="btn-play" aria-keyshortcuts="P">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" id="play-icon"><path d="M7 5v14l12-7L7 5Z"/></svg><span id="play-label">Play step</span>
+                  </button>
+                  <button type="button" class="btn" id="btn-next" aria-keyshortcuts="ArrowRight Space">
+                    <span id="next-label">Next step</span><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></svg>
+                  </button>
+                </div>
               </div>
               <div class="speed-row">
                 <span class="muted small" id="speed-label">Speed</span>
