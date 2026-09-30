@@ -1,6 +1,55 @@
 // Teaching content for each solver stage. Pure data; must match src/solver.js
 // (white on the bottom, yellow on top; algorithms below are exactly what the solver uses).
 
+// ---- How to hold the cube and which hand/finger makes each move ---------------------
+// One beginner-friendly sentence per move, consistent with the hands animation in
+// src/hands.js (right hand turns R, F, B; left hand turns L; right index flicks U; left ring
+// pulls D; both hands turn y). Home grip: cube in both hands, white on the bottom, green facing
+// you, thumbs on the front face near the bottom corners, fingers wrapped around the back.
+export const HOME_GRIP = 'Home grip: hold the cube with both hands, thumbs on the front face near the bottom corners and fingers wrapped around the back, index fingers resting near the top back edge.';
+
+const GRIP = {
+  U: 'U: right index finger pushes the top layer to the left.',
+  "U'": "U': left index finger pushes the top layer to the right.",
+  U2: 'U2: right index finger flicks the top layer to the left twice.',
+  D: 'D: left ring finger pulls the front of the bottom layer to the right.',
+  "D'": "D': right ring finger pulls the front of the bottom layer to the left.",
+  D2: 'D2: left ring finger pulls the bottom layer to the right twice.',
+  R: 'R: right hand — turn the right side up and away, like turning a doorknob.',
+  "R'": "R': right hand — turn the right side down and toward you, like turning a doorknob back.",
+  R2: 'R2: right hand — turn the right side up and over twice, a doorknob turn each time.',
+  L: 'L: left hand — turn the left side down and toward you, like turning a doorknob.',
+  "L'": "L': left hand — turn the left side up and away, like turning a doorknob back.",
+  L2: 'L2: left hand — turn the left side down and over twice, a doorknob turn each time.',
+  F: 'F: right hand — pinch the front layer with thumb and fingers and turn it clockwise, top edge to the right.',
+  "F'": "F': left hand — pinch the front layer with thumb and fingers and turn it counter-clockwise, top edge to the left.",
+  F2: 'F2: right hand — pinch the front layer with thumb and fingers and turn it a half turn.',
+  B: 'B: right hand — reach around the back and turn the back layer so its top edge moves to your left.',
+  "B'": "B': right hand — reach around the back and turn the back layer so its top edge moves to your right.",
+  B2: 'B2: right hand — reach around the back and turn the back layer a half turn.',
+  y: 'y: both hands turn the whole cube to the left, so the right face comes to the front.',
+  "y'": "y': both hands turn the whole cube to the right, so the left face comes to the front.",
+  y2: 'y2: both hands turn the whole cube a half turn, so the back face comes to the front.',
+  x: 'x: both hands tip the whole cube up and away, so the front face goes to the top.',
+  "x'": "x': both hands tip the whole cube down and toward you, so the top face comes to the front.",
+  x2: 'x2: both hands tip the whole cube over a half turn, front to back.',
+  z: 'z: both hands turn the whole cube clockwise like a steering wheel, top face to the right.',
+  "z'": "z': both hands turn the whole cube counter-clockwise like a steering wheel, top face to the left.",
+  z2: 'z2: both hands turn the whole cube a half turn like a steering wheel.',
+};
+
+// Short instruction for one move token (U D R L F B, x y z, slices and wide turns; ', 2).
+export function gripFor(move) {
+  const t = String(move ?? '').replace(/[’`]/g, "'").trim().replace(/2'$/, '2');
+  if (GRIP[t]) return GRIP[t];
+  const m = /^([MESurfdlb])(2|')?$/.exec(t);
+  if (m) {
+    const half = m[2] === '2' ? ' a half turn' : m[2] === "'" ? ' the other way' : '';
+    return `${t}: hold the cube steady with your left hand and turn that layer${half} with your right fingers, then return to the home grip.`;
+  }
+  return `${t || 'Move'}: turn that layer with the hand that reaches it most easily and hold the cube steady with the other, then return to the home grip.`;
+}
+
 export const NOTATION = [
   { move: 'U', description: 'Turn the top layer a quarter turn clockwise, as if you were looking down at it from above.' },
   { move: "U'", description: 'The apostrophe (say "prime") means the opposite way: a quarter turn counter-clockwise.' },
@@ -11,7 +60,7 @@ export const NOTATION = [
   { move: 'F', description: 'Turn the front layer (the one facing you) clockwise, like turning a steering wheel to the right.' },
   { move: 'B', description: 'Turn the back layer clockwise as if you were looking at it from behind the cube.' },
   { move: 'y', description: 'Turn the whole cube like a U move (clockwise from above) without changing the puzzle, so the right-hand face becomes the front. Use it to bring a new side in front of you.' },
-];
+].map((n) => ({ ...n, grip: gripFor(n.move) }));
 
 const HOLD = 'Hold the cube with white in the middle of the bottom face and yellow on top, green facing you.';
 

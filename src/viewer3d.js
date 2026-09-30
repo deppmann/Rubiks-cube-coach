@@ -5,9 +5,12 @@
 // state to applyMove() and recolor, so the display can never drift from the model.
 import * as THREE from '../vendor/three.module.min.js';
 import { COLOR_OF, STICKERS, SOLVED, applyMove, moveInfo, parseMoves } from './cube.js';
+import { Hands } from './hands.js';
 
+// Vivid, stickerless-speed-cube palette (sRGB). Kept far apart in hue and lightness so every
+// color reads at a glance on a phone, even the darker blue, red and green.
 export const STICKER_HEX = {
-  white: '#ffffff', yellow: '#ffd500', green: '#009b48', blue: '#0046ad', red: '#b71234', orange: '#ff5800',
+  white: '#f7f7f2', yellow: '#ffd500', green: '#00b34a', blue: '#0a5ce6', red: '#e0182d', orange: '#ff6a00',
 };
 
 // ---- Pure helpers ----------------------------------------------------------------
@@ -98,16 +101,31 @@ export function arcPoints(spec, n = 24, tMax = 1) {
   return Array.from({ length: n + 1 }, (_, i) => arcPoint(spec, (i / n) * tMax).point);
 }
 
-// Mix a color (0..1 rgb) toward grey by k; used for the dimmed "not this piece" look.
+// Mix a color (0..1 rgb) toward grey by k.
 export function dimMix(rgb, grey, k) {
   return rgb.map((c, i) => c + (grey[i] - c) * k);
 }
+
+// The dimmed "not this step" look for a sticker (sRGB 0..1), k in 0..1: keeps the hue and most
+// of the saturation (desaturates at most DIM_DESAT toward the color's OWN luminance, never a
+// shared grey) and only darkens by DIM_DARKEN, so blue, red and green stay distinguishable.
+export const DIM_DARKEN = 0.3;
+export const DIM_DESAT = 0.18;
+export function dimSticker(rgb, k) {
+  const lum = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
+  return rgb.map((c) => (c + (lum - c) * DIM_DESAT * k) * (1 - DIM_DARKEN * k));
+}
+
+export const hexToRgb = (hex) => [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
 
 // ---- Viewer ----------------------------------------------------------------------
 
 const DEFAULT_PHI = (28 * Math.PI) / 180;    // elevation: from above
 const FOV = 32;
-const DIM_STRENGTH = 0.75;                   // dimmed stickers keep ~25% of their color
+const EMISSIVE = 0.24;                       // stickers glow a little so shadowed sides stay vivid
+const EMISSIVE_HL = 0.2;                     // extra glow on highlighted stickers
+const LIFT_HL = 0.03;                        // highlighted stickers float slightly above the cube
+const STICKER_Z = 0.004;
 const DIM_SECONDS = 0.35;
 const key3 = (p) => p.join(',');
 
@@ -139,11 +157,16 @@ export class CubeViewer {
     this._dirty = true;
     this._dim = new Float32Array(54);
     this._dimTarget = new Float32Array(54);
+    this._hl = new Float32Array(54);         // 1 = highlighted piece (rim + glow + lift)
+    this._hlTarget = new Float32Array(54);
+    this._handsOn = true;
     this._disposables = [];
 
     const renderer = (this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }));
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setClearColor(0x000000, 0);
+    renderer.outputColorSpace = THREE.SRGBColorSpace;   // colors are set as sRGB and converted once by three
+    renderer.toneMapping = THREE.NoToneMapping;         // tone mapping would wash out the saturated stickers
     const canvas = (this.canvas = renderer.domElement);
     Object.assign(canvas.style, { display: 'block', width: '100%', height: '100%', touchAction: 'none', cursor: 'grab' });
     container.appendChild(canvas);
@@ -152,6 +175,8 @@ export class CubeViewer {
     this.camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 100);
     this._buildLights();
     this._buildCube();
+    this.hands = new Hands();
+    this.scene.add(this.hands.group);
 
     // Orbit state (spherical around the origin) with damping.
     this._theta = DEFAULT_THETA;
@@ -175,12 +200,13 @@ export class CubeViewer {
 
   _buildLights() {
     const s = this.scene;
-    s.add(new THREE.HemisphereLight(0xffffff, 0x8a90a0, 1.5));
-    const key = new THREE.DirectionalLight(0xffffff, 2.2);
+    // Strong ambient so the shadowed side is still clearly colored; the key light adds shape.
+    s.add(new THREE.HemisphereLight(0xffffff, 0xd0d4de, 2.6));
+    const key = new THREE.DirectionalLight(0xffffff, 1.5);
     key.position.set(4, 7, 6);
-    const fill = new THREE.DirectionalLight(0xdde6ff, 0.8);
+    const fill = new THREE.DirectionalLight(0xffffff, 0.7);
     fill.position.set(-6, 2, 3);
-    const rim = new THREE.DirectionalLight(0xffffff, 0.6);
+    const rim = new THREE.DirectionalLight(0xffffff, 0.5);
     rim.position.set(-2, -5, -6);
     s.add(key, fill, rim);
   }
@@ -215,20 +241,39 @@ export class CubeViewer {
       this.cubeGroup.add(g);
     }
 
-    this.stickerMeshes = STICKERS.map((s) => {
-      const mat = this._track(new THREE.MeshPhysicalMaterial({
-        color: 0xffffff, roughness: 0.35, metalness: 0, clearcoat: 0.7, clearcoatRoughness: 0.25,
-      }));
+    // Matte-ish stickers with a small emissive share (set per sticker in _paint): vivid, no haze.
+    const rimGeo = this._track(new THREE.ShapeGeometry(roundedRect(new THREE.Shape(), 0.9, 0.9, 0.16), 6));
+    this.stickerMeshes = [];
+    this.rimMeshes = [];
+    for (const s of STICKERS) {
+      const mat = this._track(new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5, metalness: 0 }));
       const mesh = new THREE.Mesh(stickerGeo, mat);
       const t = stickerTransform(s.index);
-      // Local to its cubie: normal * (HALF + hair to avoid z-fighting).
-      mesh.position.set(...s.normal.map((n) => n * (HALF + 0.004)));
-      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...t.normal));
-      this.cubieAt.get(key3(s.pos)).group.add(mesh);
-      return mesh;
-    });
-    this._baseColors = STICKERS.map(() => new THREE.Color());
-    this._grey = new THREE.Color('#8b909b');
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), new THREE.Vector3(...t.normal));
+      mesh.quaternion.copy(q);
+      const rimMat = this._track(new THREE.MeshBasicMaterial({
+        color: 0xffffff, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2,
+      }));
+      const rim = new THREE.Mesh(rimGeo, rimMat);
+      rim.quaternion.copy(q);
+      rim.position.set(...s.normal.map((n) => n * (HALF + 0.002)));
+      rim.visible = false;
+      const g = this.cubieAt.get(key3(s.pos)).group;
+      g.add(rim, mesh);
+      this.stickerMeshes.push(mesh);
+      this.rimMeshes.push(rim);
+    }
+    this._baseRGB = STICKERS.map(() => [0.5, 0.5, 0.5]);
+    this._col = new THREE.Color();
+    this._placeStickers();
+  }
+
+  // Sticker offset from its cubie face: a hair to avoid z-fighting, plus the highlight lift.
+  _placeStickers() {
+    for (const s of STICKERS) {
+      const off = HALF + STICKER_Z + LIFT_HL * this._hl[s.index];
+      this.stickerMeshes[s.index].position.set(...s.normal.map((n) => n * off));
+    }
   }
 
   // -- events / sizing
@@ -276,7 +321,7 @@ export class CubeViewer {
     // Fit the cube (bounding radius ~2.9 incl. arrows) in the tighter of the two fields of view.
     const vHalf = (FOV * Math.PI) / 360;
     const hHalf = Math.atan(Math.tan(vHalf) * this.camera.aspect);
-    this._radius = 3.1 / Math.sin(Math.min(vHalf, hHalf));
+    this._radius = (this._handsOn ? 3.4 : 3.1) / Math.sin(Math.min(vHalf, hHalf));
     this.camera.updateProjectionMatrix();
     this._dirty = true;
   }
@@ -330,6 +375,9 @@ export class CubeViewer {
 
   setHint(move) {
     this._hintMove = move;
+    // Hands move into the grip for the coming move while the arrow shows (static under reduced motion).
+    if (this._reduce()) { if (move) this.hands.hold(move); else this.hands.release(); }
+    else { this.hands.setInstant(false); this.hands.prepare(move); }
     if (this._hint) {
       this.cubeGroup.remove(this._hint.group);
       this._hint.group.traverse((o) => { o.geometry?.dispose?.(); o.material?.map?.dispose?.(); o.material?.dispose?.(); });
@@ -340,7 +388,21 @@ export class CubeViewer {
 
   setHighlight(indices) {
     const on = indices ? new Set(indices) : null;
-    for (let i = 0; i < 54; i++) this._dimTarget[i] = on && !on.has(i) ? 1 : 0;
+    for (let i = 0; i < 54; i++) {
+      this._dimTarget[i] = on && !on.has(i) ? 1 : 0;
+      this._hlTarget[i] = on && on.has(i) ? 1 : 0;
+    }
+  }
+
+  // Show or hide the coaching hands (default on).
+  setHands(on) {
+    this._handsOn = !!on;
+    this.hands.setVisible(this._handsOn);
+    this._resize();
+  }
+
+  _reduce() {
+    return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
 
   dispose() {
@@ -353,6 +415,7 @@ export class CubeViewer {
       this.canvas.removeEventListener(ev, ev === 'pointerdown' ? this._onDown : ev === 'pointermove' ? this._onMove : this._onUp);
     }
     this.setHint(null);
+    this.hands.dispose();
     this._disposables.forEach((d) => d.dispose());
     this.renderer.dispose();
     this.canvas.remove();
@@ -361,14 +424,24 @@ export class CubeViewer {
   // -- internals
 
   _recolor() {
-    for (let i = 0; i < 54; i++) this._baseColors[i].set(stickerHex(this.state[i], this.colorOf));
+    for (let i = 0; i < 54; i++) this._baseRGB[i] = hexToRgb(stickerHex(this.state[i], this.colorOf));
     this._dirty = true;
   }
 
   _paint() {
+    const c = this._col;
     for (let i = 0; i < 54; i++) {
-      this.stickerMeshes[i].material.color.copy(this._baseColors[i]).lerp(this._grey, this._dim[i] * DIM_STRENGTH);
+      const [r, g, b] = dimSticker(this._baseRGB[i], this._dim[i]);
+      const m = this.stickerMeshes[i].material;
+      c.setRGB(r, g, b, THREE.SRGBColorSpace);
+      m.color.copy(c);
+      m.emissive.copy(c);
+      m.emissiveIntensity = EMISSIVE + EMISSIVE_HL * this._hl[i];
+      const rim = this.rimMeshes[i];
+      rim.visible = this._hl[i] > 0.01;
+      rim.material.opacity = 0.95 * this._hl[i];
     }
+    this._placeStickers();
   }
 
   // Put every cubie back at its home slot (colors live on the stickers, driven by state).
@@ -383,7 +456,14 @@ export class CubeViewer {
   _turn(move, speed, commit = () => {}) {
     const info = moveInfo(move);
     const reduce = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (reduce) { commit(); return Promise.resolve(); }
+    if (reduce) {
+      this.hands.hold(move);
+      clearTimeout(this._holdT);
+      this._holdT = setTimeout(() => { if (!this._disposed && !this._hintMove) this.hands.release(); }, 1200);
+      commit();
+      return Promise.resolve();
+    }
+    this.hands.begin(move);
     // Cubies are always at home between moves, so the layer test uses home positions.
     for (const c of this.cubies) if (info.layer(c.home)) this.pivot.add(c.group);
     const axis = new THREE.Vector3(...info.axis);
@@ -394,6 +474,7 @@ export class CubeViewer {
         finish: () => {
           this.pivot.quaternion.setFromAxisAngle(axis, angle);
           this._anim = null;
+          this.hands.end();
           commit();
           resolve();
         },
@@ -401,6 +482,7 @@ export class CubeViewer {
           const t = (now - anim.t0) / anim.dur;
           if (t >= 1) return anim.finish();
           this.pivot.quaternion.setFromAxisAngle(axis, angle * easeInOut(t));
+          this.hands.setTurn(t);
         },
       };
       this._anim = anim;
@@ -494,7 +576,13 @@ export class CubeViewer {
         this._dim[i] = Math.abs(d) <= step ? this._dimTarget[i] : this._dim[i] + Math.sign(d) * step;
         this._dirty = true;
       }
+      const h = this._hlTarget[i] - this._hl[i];
+      if (h !== 0) {
+        this._hl[i] = Math.abs(h) <= step ? this._hlTarget[i] : this._hl[i] + Math.sign(h) * step;
+        this._dirty = true;
+      }
     }
+    if (this._handsOn) this.hands.update(dt);
     if (this._dirty) { this._paint(); this._dirty = false; }
 
     if (this._hint) {
